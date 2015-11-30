@@ -15,6 +15,7 @@ repositories {
 
 dependencies {
     compile 'org.apache.jackrabbit:jackrabbit-webdav:2.10.1'
+    compile files('libs/libsectf.jar')
 }
 
 android {
@@ -30,6 +31,7 @@ android {
             renderscript.srcDirs = ['src']
             res.srcDirs = ['res']
             assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
         }
 
         // Move the tests to tests/java, tests/res, etc...

@@ -60,7 +60,7 @@ public class ChunkedUploadRemoteFileOperation extends UploadRemoteFileOperation 
         FileChannel channel = null;
         RandomAccessFile raf = null;
         try {
-            File file = new File(mLocalPath);
+            File file = getCryptoFileObject(mLocalPath);
             raf = new RandomAccessFile(file, "r");
             channel = raf.getChannel();
             mEntity = new ChunkFromFileChannelRequestEntity(channel, mMimeType, CHUNK_SIZE, file);
@@ -106,9 +106,11 @@ public class ChunkedUploadRemoteFileOperation extends UploadRemoteFileOperation 
                         ", chunk index " + chunkIndex + ", count " + chunkCount +
                         ", HTTP result status " + status);
 
+
                 if (!isSuccess(status))
                     break;
             }
+            cleanCryptoFileObject(file);
             
         } finally {
             if (channel != null)

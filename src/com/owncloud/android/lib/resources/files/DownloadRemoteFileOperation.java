@@ -47,6 +47,15 @@ import com.owncloud.android.lib.common.operations.RemoteOperation;
 import com.owncloud.android.lib.common.operations.RemoteOperationResult;
 import com.owncloud.android.lib.common.utils.Log_OC;
 
+// Add for secure DEMO
+import com.vapor.SectfAPI;
+import com.vapor.AlgModeCode;
+import com.vapor.AlgTypeCode;
+import com.vapor.KeyTypeCode;
+import com.vapor.KeyFlagCode;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+
 /**
  * Remote operation performing the download of a remote file in the ownCloud server.
  * 
@@ -65,10 +74,13 @@ public class DownloadRemoteFileOperation extends RemoteOperation {
     
     private String mRemotePath;
     private String mLocalFolderPath;
+
+    protected SectfAPI mStfAPI = null;
 	
 	public DownloadRemoteFileOperation(String remotePath, String localFolderPath) {
 		mRemotePath = remotePath;
 		mLocalFolderPath = localFolderPath;
+        mStfAPI = new SectfAPI();
 	}
 
 	@Override
@@ -96,7 +108,85 @@ public class DownloadRemoteFileOperation extends RemoteOperation {
         return result;
 	}
 
-	
+    public boolean decryptFile(File encrypt_file) {
+        //打开TF卡  this.getActivity(),"net.sectf"
+        boolean isok = mStfAPI.SFOpenDev();
+        if (isok) {
+
+            String str_tfver = mStfAPI.SFGetVersion();
+            String str_tfid = mStfAPI.SFGetDevID();
+            String str_keyver = mStfAPI.KeyFileVersion();
+            Log_OC.i(TAG, "str_tfver:" + str_tfver + ",str_tfid:" + str_tfid + ",str_keyver:" + str_keyver);
+        }
+
+        //认证口令
+        isok = mStfAPI.UsrLogin("123123123".getBytes());
+
+        if(isok)
+        {
+            Log_OC.i(TAG, "认证成功！");
+        }
+//        TODO: fix me
+//        else
+//        {
+//
+//        }
+
+
+        File decrypt_file = new File(encrypt_file.getAbsolutePath() + ".decrypt");
+
+        FileInputStream in = null;
+        FileOutputStream out = null;
+
+        try {
+
+            in = new FileInputStream(encrypt_file);
+            out = new FileOutputStream(decrypt_file);
+
+            byte[] btDataBuf = new byte[2208];// 密文缓冲区 加密时按照2048分组，解密时按照2048+160读取
+            byte[] btOutBuf;// 明文缓冲区
+
+            //解密
+            int len;
+            while ((len = in.read(btDataBuf)) > 0) {
+//                for (int k = 0; k<1;k++) {
+//                    String line = "";
+//                    for (int i = 0; i < 32; i++) {
+//                        String hex = Integer.toHexString(btDataBuf[i] & 0xFF);
+//                        if (hex.length() == 1) {
+//                            hex = '0' + hex;
+//                        }
+//                        line += " " + hex;
+//
+//                    }
+//                    Log_OC.e(TAG, line.toUpperCase());
+//                }
+
+                btOutBuf = mStfAPI.SFCyptoDecData(btDataBuf);
+//                Log_OC.v(TAG, "btDataBuf:" + btDataBuf + ", len:" + len + ",btOutBuf:" + btOutBuf + ", len:" + btOutBuf.length);
+                out.write(btOutBuf, 0, btOutBuf.length);
+            }
+
+            decrypt_file.renameTo(encrypt_file);
+        }
+        catch (Exception e) {
+            Log_OC.e(TAG, "Decrypt fail" + e.toString());
+            return false;
+        }
+        finally {
+            mStfAPI.UsrLogout();
+            mStfAPI.SFCloseDev();
+            try {
+                if (in != null) in.close();
+                if (out != null) out.close();
+            } catch (Exception e) {
+                Log_OC.w(TAG, "Weord exception while closing stream");
+            }
+        }
+
+        return true;
+    }
+
     protected int downloadFile(OwnCloudClient client, File targetFile) throws HttpException,
             IOException, OperationCancelledException {
         int status = -1;
@@ -157,7 +247,15 @@ public class DownloadRemoteFileOperation extends RemoteOperation {
             if (!savedFile && targetFile.exists()) {
                 targetFile.delete();
             }
+            // Add decrypt method
+            Log_OC.e(TAG, "开始解密" + targetFile.toString());
+            if (targetFile.exists()) {
+                decryptFile(targetFile);
+            }
+            Log_OC.e(TAG, "解密完成");
             mGet.releaseConnection();    // let the connection available for other methods
+
+
         }
         return status;
     }
