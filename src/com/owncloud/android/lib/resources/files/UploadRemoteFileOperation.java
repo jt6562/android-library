@@ -1,22 +1,22 @@
 /* ownCloud Android Library is available under MIT license
  *   Copyright (C) 2015 ownCloud Inc.
- *   
+ *
  *   Permission is hereby granted, free of charge, to any person obtaining a copy
  *   of this software and associated documentation files (the "Software"), to deal
  *   in the Software without restriction, including without limitation the rights
  *   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  *   copies of the Software, and to permit persons to whom the Software is
  *   furnished to do so, subject to the following conditions:
- *   
+ *
  *   The above copyright notice and this permission notice shall be included in
  *   all copies or substantial portions of the Software.
- *   
- *   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+ *
+ *   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  *   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- *   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
- *   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS 
- *   BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN 
- *   ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+ *   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ *   BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ *   ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  *   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  *   THE SOFTWARE.
  *
@@ -47,9 +47,18 @@ import com.owncloud.android.lib.common.operations.RemoteOperation;
 import com.owncloud.android.lib.common.operations.RemoteOperationResult;
 import com.owncloud.android.lib.common.utils.Log_OC;
 
+// Add for secure DEMO
+import com.vapor.SectfAPI;
+import com.vapor.AlgModeCode;
+import com.vapor.AlgTypeCode;
+import com.vapor.KeyTypeCode;
+import com.vapor.KeyFlagCode;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+
 /**
  * Remote operation performing the upload of a remote file to the ownCloud server.
- * 
+ *
  * @author David A. Velasco
  * @author masensio
  */
@@ -67,16 +76,21 @@ public class UploadRemoteFileOperation extends RemoteOperation {
 	protected PutMethod mPutMethod = null;
 	protected boolean mForbiddenCharsInServer = false;
 	protected String mRequiredEtag = null;
-	
+
 	protected final AtomicBoolean mCancellationRequested = new AtomicBoolean(false);
 	protected Set<OnDatatransferProgressListener> mDataTransferListeners = new HashSet<OnDatatransferProgressListener>();
 
 	protected RequestEntity mEntity = null;
 
+    private static final int BUF_LEN = 2048;
+	protected SectfAPI mStfAPI = null;
+
 	public UploadRemoteFileOperation(String localPath, String remotePath, String mimeType) {
 		mLocalPath = localPath;
 		mRemotePath = remotePath;
 		mMimeType = mimeType;
+
+		mStfAPI = new SectfAPI();
 	}
 
 	public UploadRemoteFileOperation(String localPath, String remotePath, String mimeType, String requiredEtag) {
@@ -123,10 +137,100 @@ public class UploadRemoteFileOperation extends RemoteOperation {
                 status == HttpStatus.SC_NO_CONTENT));
 	}
 
+	public File getCryptoFileObject(String path) {
+        //打开TF卡  this.getActivity(),"net.sectf"
+        boolean isok = mStfAPI.SFOpenDev();
+        if (isok) {
+
+            String str_tfver = mStfAPI.SFGetVersion();
+            String str_tfid = mStfAPI.SFGetDevID();
+            String str_keyver = mStfAPI.KeyFileVersion();
+            Log_OC.i(TAG, "str_tfver:" + str_tfver + ",str_tfid:" + str_tfid + ",str_keyver:" + str_keyver);
+        }
+
+		//认证口令
+        isok = mStfAPI.UsrLogin("123123123".getBytes());
+
+		if(isok)
+		{
+            Log_OC.i(TAG, "认证成功！");
+		}
+//        TODO: fix me
+//        else
+//        {
+//
+//        }
+
+
+        String tmpFilePath = path + ".encrypt";
+        FileInputStream in = null;
+        FileOutputStream out = null;
+
+        try {
+
+            in = new FileInputStream(path);
+            out = new FileOutputStream(tmpFilePath);
+
+            byte[] btDataBuf = new byte[BUF_LEN];// 明文缓冲区
+            byte[] btOutBuf;// 密文缓冲区
+            byte[] btThirBuf;// 解密缓冲区
+            byte[] offset = new byte[4];
+
+            //加密
+            int len;
+            while ((len = in.read(btDataBuf)) > 0) {
+                byte[] btInBuf = null;
+                if (len < BUF_LEN) {
+                    btInBuf = new byte[len];
+                    for (int i = 0; i < len; i++) {
+                        btInBuf[i] = btDataBuf[i];
+                    }
+                } else {
+                    btInBuf = btDataBuf;
+                }
+
+                btOutBuf = mStfAPI.SFCyptoEncData(
+                        1,
+                        2,
+                        (byte) AlgTypeCode.ALG_TYPE_INF.getValue(), // 算法类型
+                        (byte) AlgModeCode.ALG_MODE_ECB.getValue(), // 算法模式
+                        KeyTypeCode.KEY_TYPE_DOUBLEKEY.getValue(),
+                        KeyFlagCode.KEY_FLAG_COM.getValue(),
+                        offset,
+                        new byte[16],
+                        btInBuf);
+//                Log_OC.v(TAG, "btDataBuf:" + btDataBuf+", len:"+btDataBuf.length + ",btOutBuf:"+btOutBuf+", len:"+btOutBuf.length);
+                out.write(btOutBuf, 0, btOutBuf.length);
+            }
+
+        }
+        catch (IOException e) {
+            Log_OC.e(TAG, "Encrypt fail" + e.toString());
+            return null;
+        }
+        finally {
+            mStfAPI.UsrLogout();
+            mStfAPI.SFCloseDev();
+            try {
+                if (in != null) in.close();
+                if (out != null) out.close();
+            } catch (Exception e) {
+                Log_OC.w(TAG, "Weord exception while closing stream");
+            }
+        }
+
+        return new File(tmpFilePath);
+	}
+
+    public void cleanCryptoFileObject(File object) {
+        object.delete();
+    }
+
 	protected int uploadFile(OwnCloudClient client) throws IOException {
 		int status = -1;
 		try {
-			File f = new File(mLocalPath);
+			//DEMO, add cryto
+			File f = getCryptoFileObject(mLocalPath);
 			mEntity  = new FileRequestEntity(f, mMimeType);
 			synchronized (mDataTransferListeners) {
 				((ProgressiveDataTransferer)mEntity)
@@ -153,17 +257,19 @@ public class UploadRemoteFileOperation extends RemoteOperation {
 			}
 
 			client.exhaustResponse(mPutMethod.getResponseBodyAsStream());
+            cleanCryptoFileObject(f);
 
 		} finally {
 			mPutMethod.releaseConnection(); // let the connection available for other methods
+
 		}
 		return status;
 	}
-	
+
     public Set<OnDatatransferProgressListener> getDataTransferListeners() {
         return mDataTransferListeners;
     }
-    
+
     public void addDatatransferProgressListener (OnDatatransferProgressListener listener) {
         synchronized (mDataTransferListeners) {
             mDataTransferListeners.add(listener);
@@ -172,7 +278,7 @@ public class UploadRemoteFileOperation extends RemoteOperation {
             ((ProgressiveDataTransferer)mEntity).addDatatransferProgressListener(listener);
         }
     }
-    
+
     public void removeDatatransferProgressListener(OnDatatransferProgressListener listener) {
         synchronized (mDataTransferListeners) {
             mDataTransferListeners.remove(listener);
@@ -181,7 +287,7 @@ public class UploadRemoteFileOperation extends RemoteOperation {
             ((ProgressiveDataTransferer)mEntity).removeDatatransferProgressListener(listener);
         }
     }
-    
+
     public void cancel() {
         synchronized (mCancellationRequested) {
             mCancellationRequested.set(true);
